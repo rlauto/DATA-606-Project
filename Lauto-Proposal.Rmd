@@ -1,0 +1,140 @@
+---
+title: "Proposal"
+author: "Robert Lauto"
+date: "11/2/2018"
+output: html_document
+---
+
+### Data Preparation
+
+```{r setup, echo=TRUE, results='hide', warning=FALSE, message=FALSE}
+library(jsonlite)
+library(httr)
+library(tidyverse)
+library(curl)
+library(dplyr)
+library(geniusr)
+library(jsonlite)
+library(tidytext)
+library(assertr)
+library(psych)
+library(wordcloud)
+
+top_2017 <- read.csv("featuresdf.csv")
+spot_daily <- read.csv("spotify's_world_wide_daily_song_ranking.csv")
+
+# Filtering the Spotify data frame down to the US only
+usspot = spot_daily %>% 
+  filter(Region == 'us' & grepl('2017', Date))
+
+# Calculate the mean rank for each song in the usspot dataframe
+mean_rank <- usspot %>% 
+  group_by(URL) %>%
+  summarise(mean_ranking = mean(Position.x))
+
+# left join to add the mean ranks
+merged_w_mranks <- merged_df %>% 
+  left_join(mean_rank, by = "URL")
+
+# creating for loop to get top 100 song lyrics
+
+for (i in 1:nrow(top_2017)) {
+  
+  print('On to the next song')
+  print('searching for song in genius')
+  sr <- search_song(search_term = as.character(top_2017$name[i]), n_results = 25) %>% 
+    filter(grepl(as.character(top_2017$artists[i]), artist_name))
+  
+  if (is.null(sr$song_id[1]) != T) {
+    tryCatch({
+      lyricsdf <- scrape_lyrics_id(song_id = sr$song_id[1]) 
+     
+      print('creating wordcount data frame')
+      wordcount <- lyricsdf %>% 
+      unnest_tokens(word, line, to_lower = T) %>% 
+      count(word, sort = T )
+      
+      print('creating variables and saving to usspot dataframe')
+      max_count <- max(wordcount$n)
+      unique_words <- nrow(wordcount)
+      max_total_ratio <- max(wordcount$n)/nrow(wordcount)
+      lyrics <- tolower(paste(lyricsdf$line, collapse = " "))
+      top_2017$lyrics[i] <- lyrics
+      top_2017$max_count[i] <- max_count
+      top_2017$unique_words[i] <- unique_words
+      top_2017$max_total_ratio[i] <- max_total_ratio
+    }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+  }
+
+  
+  Sys.sleep(2)
+}
+```
+
+
+### Research question 
+
+**You should phrase your research question in a way that matches up with the scope of inference your dataset allows for.**
+  
+Is a songs danceability predictive of its popularity?
+
+
+### Cases 
+
+**What are the cases, and how many are there?**
+  
+In the daily Spotify dataset, each case is a song that ranked the top 200 most streamed songs for each day in 2017 in the US.There are 72400 observations.
+  
+In the top_2017 dataset, each case is a song that ranked in Spotify's top 100 most streamed songs for 2017 and each song's audio features. There are 100 observations.
+
+
+### Data collection 
+
+**Describe the method of data collection.**
+  
+Data was collected from a playlist Spoify has put together for the 200 most streamed tracks by country each day. Spotify also created a playlist of top 100 songs of 2017 and included descriptive audio features.
+
+### Type of study 
+
+**What type of study is this (observational/experiment)?**
+  
+This is an observational study.
+
+
+### Data Source 
+
+**If you collected the data, state self-collected. If not, provide a citation/link.**
+  
+https://www.kaggle.com/edumucelli/spotifys-worldwide-daily-song-ranking
+
+https://www.kaggle.com/nadintamer/top-tracks-of-2017
+
+Genius.com API
+
+### Dependent Variable
+
+**What is the response variable? Is it quantitative or qualitative?**
+
+The response variable is the ranking or average ranking of a song and it is quantitative.
+
+### Independent Variable
+
+**You should have two independent variables, one quantitative and one qualitative.**
+  
+The quantitative independent variable is the danceability The qualitative variable is the lyrics that I collect from genius API.
+
+### Relevant summary statistics 
+
+**Provide summary statistics for each the variables. Also include appropriate visualizations related to your research question (e.g. scatter plot, boxplots, etc). This step requires the use of R, hence a code chunk is provided below. Insert more code chunks as needed.**
+
+```{r}
+describe(mean_rank$mean_ranking)
+
+describe(top_2017$danceability)
+
+wordcloud(top_2017$lyrics, max.words =100, min.freq = 4, scale = c(4,.5))
+
+plot(density(mean_rank$mean_ranking))
+
+plot(density(top_2017$danceability))
+```
