@@ -1,0 +1,265 @@
+---
+title: "DATA 606 Data Project"
+author: "Robert Lauto"
+date: "12/12/2018"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+
+---
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(jsonlite)
+library(httr)
+library(tidyverse)
+library(curl)
+library(dplyr)
+library(geniusr)
+library(jsonlite)
+library(tidytext)
+library(assertr)
+library(psych)
+library(wordcloud)
+library(knitr)
+library(kableExtra)
+library(corrplot)
+library(ggplot2)
+library(gridExtra)
+```
+```{r echo=FALSE}
+# load data
+topYear <- read.csv("/Users/Rob/Documents/MSDS/DATA 606/project/featuresdf.csv")
+top200 <- read.csv("/Users/Rob/Documents/MSDS/DATA 606/project/data.csv")
+```
+
+### Part 1 - Introduction
+  
+Since the advent of the music streaming industry much more data can and is recorded to learn about everyone's listening behavior and preferences. Before streaming was introduced as a product and concept there were few ways to keep track of a listener's likes, dislikes, and general listening habits. Using the newly collected data, streaming services like Spotify have built machine learning algorithms to curate playlists for each listener. Luckily, Spotify not only collects data on user behavior, but also statistics describing each song on the platform. 
+
+Suppose we are responsible for managing a pop-rock band (picture a group similar to Imagine Dragons); last year they released their debut album with our management company, however, it didn't have great reception from the public. The band was dissappointed since they anticipated their debut to be a great hit after a few singles were initially dropped and well received. Frustrated, the band comes to you for advice regarding which direction they should take when working on their sophmore album in the coming months. They want to gaurentee the next album will receive more attention than their first and the lead singer is convinced that making the next album more upbeat and danceable will ensure it catches on with the public better than previously. However, the rest of the band does not believe it is worth changing the bands persona and sound because they don't believe a danceable album will make any difference. 
+
+Luckily, we have the abundance of data from streaming services to help up determine who is correct; is the lead singer correct or the rest of the band? More directly, does the streaming data provide evidence that the more dancable a song, the more likely it is to make it to the top of the charts? If we are able to determine the relationship between danceability and popularity we will be able to properly advice our clients(bands).
+
+### Part 2 - Data
+  
+#### Collection  
+The data used in this study is from Spotify, however, the datasets were found on Kaggle.com in easy to download csv files. [The playlist of the top 100 spotify tracks](https://www.kaggle.com/nadintamer/top-tracks-of-2017) and [Spotify's Worldwide Daily Song Ranking](https://www.kaggle.com/edumucelli/spotifys-worldwide-daily-song-ranking)
+  
+#### Cases
+  
+In the dataset `topYear` each case is an individual song that was selected to be in the Spotify's Top Tracks of 2017 playlist. There are exactly 100 songs and rows in this dataset along with measures of descriptive audio features such as: danceability, energy, loudness, speechiness, etc.
+
+The `top200` dataset has 3,441,197 rows; each case is a song that ranked in the top 200 songs streamed in a country for a day in the year 2017.
+  
+#### Variables
+  
+I will be focusing on the danceability (an numeric scale 0-1) the explanatory variable and its relationship to total number of streams, the reponse variable.
+  
+#### Type of Study
+  
+This study is observational because I have not set up a control group and I am using data that has already been collected. All of Spotify's data is obervational as they are merely collecting data as users listen on the app.
+  
+#### Scope of inference
+  
+The population of interest are people streaming music. Using the sample data from spotify we are certainly able to generalize to the population of Spotify users and possibly the greater population of people who use music streaming services.
+  
+Due to the nature of this study being observational I am not able to determine causality, however, I can establish whether or not danceability has a correlation to the number of streams for a song.
+
+### Part 3 - Exploratory data analysis
+  
+#### Danceability
+Lets begin exploring the data by taking a look at the explanatory variable, danceability. According to the datasets description, danceability describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is most danceable.
+
+```{r}
+summary(topYear$danceability)
+hist(topYear$danceability, main = 'Histogram of danceability', xlab = 'Danceability', col = 'red')
+```
+  
+The distribution appears to be left skewed; this does not come as suprise to me because this dataset only contains data for the top 100 tracks of 2017 and I would assume that many songs selected for this exclusive playlist were quite danceable. But that is only an assumption and we will now see if the more danceable tracks have more streams than less danceable tracks.
+    
+#### Streams
+
+To take a closer look and determine the total number of streams for a song we will have to aggregate the data. 
+
+```{r, warning = FALSE}
+tot_streams <- top200 %>% 
+  group_by(Track.Name) %>%
+  summarise(total_streams = sum(as.numeric(Streams))) %>% 
+  arrange(desc(total_streams))
+
+kable(head(tot_streams, n = 20L)) %>% 
+    kable_styling(full_width = F) %>% 
+    column_spec(1, width = "50cm")
+
+summary(tot_streams$total_streams)
+
+hist(tot_streams$total_streams, main = 'Histogram of total streams', xlab = 'Total Streams', col = 'lightblue')
+```
+  
+Looking at the histogram at first might be confusing but take a second glance and you will see that it is extremely right skewed. There are few songs that have extremely high numbers for total streams, in the billions. There are many more songs, over 15,000 that were able to make it onto a countries top 200 list but only had a little over 1000 streams while on the list.
+
+```{r}
+topYear_n_tot <- merge(topYear, tot_streams, by.x = 'name', by.y = 'Track.Name')
+
+topYear_n_tot <- topYear_n_tot %>% 
+                    arrange(desc(total_streams))
+
+kable(topYear_n_tot) %>% 
+    kable_styling() %>%
+    scroll_box(width = "100%", height = "300px")
+
+plot(total_streams ~ danceability, topYear_n_tot)
+```
+  
+The plot seems like it may have a slight positive correlation but it is hard to tell by eye-balling it; lets run a linear model in the next section to take a closer look.
+  
+But before I do that I want to narrow down our streams dataset to just the United States to compare to the global trends. Spotify always offers top of the charts playlists for the US and the globe. It would be interesting to compare the US to the rest of the globe to see if there is a stronger correlation to danceable music.
+
+```{r}
+usspot <- top200 %>% 
+  filter(Region == 'us')
+
+us_tot_streams <- usspot %>% 
+  group_by(Track.Name) %>%
+  summarise(total_streams = sum(as.numeric(Streams))) %>% 
+  arrange(desc(total_streams))
+
+kable(us_tot_streams) %>% 
+    kable_styling() %>%
+    scroll_box(width = "100%", height = "300px")
+
+summary(us_tot_streams$total_streams)
+
+hist(us_tot_streams$total_streams, main = 'Histogram of US total streams', xlab = 'US Total Streams', col = 'lightblue')
+
+topYear_n_us_tot <- merge(topYear, us_tot_streams, by.x = 'name', by.y = 'Track.Name')
+
+topYear_n_us_tot <- topYear_n_us_tot %>% 
+                    arrange(desc(total_streams))
+
+plot(total_streams ~ danceability, topYear_n_us_tot)
+```
+  
+This plot looks have a stronger positive trend between danceability and total_streams, perhaps indicating that dance music is more popular in the US than it is on a global level.
+  
+Now that I have merged the streams for the songs together with the `topYear` dataset I'd like to better understand all correlations between variables. But lets make sure to focus on how all variables correlate to the `total_streams`.
+
+```{r}
+
+only_nums <- topYear_n_tot[,-(1:3)]
+cors <- cor(only_nums)
+corrplot(cors,
+         method = 'ellipse',
+         type = 'upper',
+         tl.srt = 45)
+
+```
+  
+Unfortunately for the lead singer of the band, it appears that on a global stage, danceability is not strongly correlated to total streams. I am interested how the corrplot will compare to a corrplot with data just from the US.
+
+```{r}
+us_only_nums <- topYear_n_us_tot[,-(1:3)]
+uscors <- cor(us_only_nums)
+corrplot(uscors,
+         method = 'ellipse',
+         type = 'upper',
+         tl.srt = 45)
+```
+  
+It appears tha in the US the total number of streams has positive correlations with both danceability and speechiness, although neither of them are that strong of a correlation.
+
+### Part 4 - Inference
+  
+Is a more danceable song more likely to become popular and get more total streams across the globe/US?
+
+H~0~: There is no difference in total streams for songs based on their danceability. Danceability is not significantly correlated to a songs total stream count, and differences in total streams are attributed to natural variation.
+
+H~1~: There is a difference in total streams for songs based on their danceability. Danceability is significantly correlated to a songs total stream count.
+
+#### Linear model
+  
+Lets plot the a linear model for the global data and US data, with danceability as the independent variable and total streams as the dependent.
+  
+```{r}
+ggplotRegression <- function (fit, main) {
+
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "red") +
+  labs(title = paste(main,
+                     "Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+cor(topYear_n_tot$total_stream, topYear_n_tot$danceability)
+cor(topYear_n_us_tot$total_stream, topYear_n_us_tot$danceability)
+
+glob_lm <- lm(total_streams ~ danceability, topYear_n_tot)
+summary(glob_lm)
+us_lm <- lm(total_streams ~ danceability, topYear_n_us_tot)
+summary(us_lm)
+```
+```{r, fig.width=8, fig.height=10}
+globplot <- ggplotRegression(glob_lm, "Global")
+
+usplot <- ggplotRegression(us_lm, "US")
+
+grid.arrange(globplot,usplot,ncol=1)
+```
+  
+#### Model Diagnostics
+  
+- Check linearity by plotting the residuals.
+
+```{r}
+par(mfrow=c(1,2))
+
+plot(glob_lm$residuals ~ topYear_n_tot$danceability, main = 'Global')
+abline(h = 0, lty = 3)
+
+plot(us_lm$residuals ~ topYear_n_us_tot$danceability, main = 'US')
+abline(h = 0, lty = 3)
+```
+  
+Both the Global and US have residuals that do not show any clear trends. However, lets note that there is an outlier in the Global model.
+
+- Check for nearly normal residuals
+  
+```{r}
+par(mfrow=c(1,2))
+
+hist(glob_lm$residuals, main = 'Global')
+hist(us_lm$residuals, main = 'US')
+```
+```{r}
+par(mfrow=c(1,2))
+
+qqnorm(glob_lm$residuals, main = "Global Normal Q-Q Plot")
+qqline(glob_lm$residuals)
+
+qqnorm(us_lm$residuals, main = "US Normal Q-Q Plot")
+qqline(us_lm$residuals)
+```
+  
+Looking at the histograms they both appear to have a slight right skew but are nearly normal. The global histogram has a greater skew than the US because the one or two outliers with a massive amount of streams. The normal QQ plot for Global streams clearly shows the outliers deviating from the normal. Outliers aside, the data looks to be nearly normal for both Global and US data streams.
+  
+- Constant variability
+
+Looking back at the residual plots made earlier, I would say that variability appears to be contant for both the Global and US model. The residuals do not seem to display a trend. The Global model does have a couple outliers as I have mentioned, therefore the model will likely be less accurate thanteh US model
+  
+### Part 5 - Conclusion
+
+We began this analysis to answer our band's question, does a songs danceabilty have a relationship to the songs popularity? Who is right, the lead singer who thinks they should change their sound to be more danceable, or the rest of the band who want to stick with their sound? What should they do when writing their next album? 
+
+From the analysis of the two Spotify datasets, it can be concluded that on a global scale, danceability does not have a significant relationship with the songs total streams. In additon, there are some outliers that make the linear model used less reliable when prediction a songs total number of streams. The global model has a negative adjusted R-squared, indicating the relationship is insignificant, as well as a P-value of 0.45.
+
+However, when we filter the data down to how songs perform in the US, the model performed much better. It can be concluded that, within the US, danceability had a significant relationship to the songs total spotify streams. There is a positive correlation with an adjusted R-squared of 0.056 and P-value of 0.012. Although, this model has a small P-value, we have to keep in mind the ajusted R-squared; with an R-squared this small, it indicates that there are many other factors at play that may be influencing the songs total streams and that danceability can only explain 5.6 percent of the variability in total streams. 
+
+Based on this analysis, I cannot advise the band to make any major changes to their future album and would recommend they continue doing what they have been doing. Despite the linear model being statistically significant for the US, changing their sound just to appeal to the listeners in the US would not be the best advice since the band hopes to eventually tour the world and gaining popularity anywhere helps increase stream counts. Larger datasets would be needed to further this research. The findings may not be the most accurate representation of the population of songs since both datasets are limited to songs that are already considered very popular. A massive dataset with both unpopular and popular songs would build a better predictive model.
+
+### References
+
+- [The playlist of the top 100 spotify tracks](https://www.kaggle.com/nadintamer/top-tracks-of-2017)
+- [Spotify's Worldwide Daily Song Ranking](https://www.kaggle.com/edumucelli/spotifys-worldwide-daily-song-ranking)
